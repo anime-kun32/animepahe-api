@@ -1,84 +1,268 @@
-# AnimePahe API Cheatsheet
 
-## Introduction
-The AnimePahe API allows users to access anime-related data programmatically. This cheatsheet provides an overview of all API objects, methods, utilities, and configurations you can use with the API.
+# 🎬 AnimePahe API - Library Cheatsheet
 
-## API Objects
-### 1. Anime
-- **Description**: Represents an anime object that contains various details about the anime.
-- **Properties**:
-  - `id`: Unique identifier for the anime.
-  - `title`: Title of the anime.
-  - `episodes`: Total number of episodes.
-  - `genres`: Array of genres associated with the anime.
+Quick reference for all **9 functions** that the animepahe-api library provides.
 
-### 2. User
-- **Description**: Represents user information in the API.
-- **Properties**:
-  - `userId`: Unique identifier for the user.
-  - `username`: Username of the user.
+---
 
-## API Methods
-### 1. Get Anime
-- **Endpoint**: `/api/anime`
-- **Method**: GET
-- **Parameters**:
-  - `id`: (required) The ID of the anime to fetch.
-- **Example**:
-  ```bash
-  curl -X GET 'https://api.animepahe.com/api/anime?id=123'
-  ```
+## 📦 Installation
 
-### 2. Search Anime
-- **Endpoint**: `/api/search`
-- **Method**: GET
-- **Parameters**:
-  - `query`: (required) Search term.
-- **Example**:
-  ```bash
-  curl -X GET 'https://api.animepahe.com/api/search?query=Naruto'
-  ```
+```bash
+npm install github:anime-kun32/animepahe-api
+```
 
-## Utilities
-### 1. Pagination
-- **Description**: Use pagination to navigate large sets of data. Include `page` and `limit` parameters in your requests.
-- **Example**:
-  ```bash
-  curl -X GET 'https://api.animepahe.com/api/anime?page=1&limit=10'
-  ```
+---
 
-### 2. Error Handling
-- **Description**: Handle errors gracefully by checking response status codes.
-- **Example**:
-  ```javascript
-  if (response.status !== 200) {
-      console.error('Error fetching data:', response.statusText);
-  }
-  ```
+## 🚀 Basic Setup
 
-## Configurations
-- **Base URL**: The base URL for the API is `https://api.animepahe.com`
-- **Timeout Settings**: Configure timeout settings for your requests to avoid hanging connections.
-- **Authentication**: Ensure to utilize API keys as necessary for secured endpoints.
-
-## Complete Examples
-### Example 1: Fetching Anime Details
 ```javascript
-async function fetchAnimeDetails(animeId) {
-    const response = await fetch(`https://api.animepahe.com/api/anime?id=${animeId}`);
-    const data = await response.json();
-    console.log(data);
+const animepahe = require('animepahe-api');
+
+async function main() {
+  // Initialize once (refreshes cookies)
+  await animepahe.initialize();
+  
+  // Now use any function
+  const results = await animepahe.search('Naruto');
+  console.log(results);
+}
+
+main();
+```
+
+---
+
+## 📚 The 9 Library Functions
+
+### 1️⃣ search(query, page = 1)
+
+Search for anime by title.
+
+```javascript
+const results = await animepahe.search('Naruto');
+const sessionId = results.data[0].session;  // Use this for other functions!
+```
+
+---
+
+### 2️⃣ getAiring(page = 1)
+
+Get currently airing anime.
+
+```javascript
+const airing = await animepahe.getAiring();
+```
+
+---
+
+### 3️⃣ getInfo(animeId)
+
+Get detailed anime information.
+
+```javascript
+const info = await animepahe.getInfo('naruto');
+// Returns: title, genre, status, episodes, studio, synopsis, ids, external_links, relations, recommendations
+```
+
+---
+
+### 4️⃣ getReleases(animeId, sort = 'episode_desc', page = 1)
+
+Get episode releases for an anime.
+
+```javascript
+const episodes = await animepahe.getReleases('naruto');
+const episodeSession = episodes.data[0].session;  // Use for getStreamingLinks!
+```
+
+---
+
+### 5️⃣ getStreamingLinks(animeId, episodeId, includeDownloads = true)
+
+Get streaming (m3u8) and download links for an episode.
+
+```javascript
+const streaming = await animepahe.getStreamingLinks('naruto', 'episode-session-id');
+// Returns: sources (m3u8 URLs), downloads, episode info
+```
+
+---
+
+### 6️⃣ getDownloadLink(url)
+
+Get direct download link from a pahewin URL.
+
+```javascript
+const directLink = await animepahe.getDownloadLink('https://pahe.win/...');
+// Returns: downloadUrl
+```
+
+---
+
+### 7️⃣ getAnimeList(tab, tag1, tag2)
+
+Get anime list (A-Z index) with optional filters.
+
+```javascript
+// All anime
+const all = await animepahe.getAnimeList();
+
+// By letter
+const animeA = await animepahe.getAnimeList('A');
+
+// By genre
+const action = await animepahe.getAnimeList(null, 'genre', 'action');
+```
+
+---
+
+### 8️⃣ getQueue()
+
+Get encoding queue status (upcoming releases).
+
+```javascript
+const queue = await animepahe.getQueue();
+```
+
+---
+
+### 9️⃣ initialize()
+
+Initialize library and refresh cookies (call once at startup).
+
+```javascript
+await animepahe.initialize();
+```
+
+---
+
+## 🔧 Advanced Access
+
+### Raw Scraper
+```javascript
+const { Animepahe } = require('animepahe-api');
+await Animepahe.initialize();
+```
+
+### Configuration
+```javascript
+const { Config } = require('animepahe-api');
+Config.baseUrl = 'https://animepahe.si';
+Config.userAgent = 'Your Custom Agent';
+```
+
+### Models
+```javascript
+const { models } = require('animepahe-api');
+const info = await models.AnimeInfoModel.getAnimeInfo('naruto');
+```
+
+---
+
+## 💡 Quick Examples
+
+### Example 1: Search and Stream
+```javascript
+async function streamAnime(query) {
+  await animepahe.initialize();
+  
+  const search = await animepahe.search(query);
+  const anime = search.data[0];
+  
+  const episodes = await animepahe.getReleases(anime.session);
+  const episode = episodes.data[0];
+  
+  const streaming = await animepahe.getStreamingLinks(anime.session, episode.session);
+  
+  console.log(`${anime.title} - EP ${episode.episode}`);
+  console.log(`Stream: ${streaming.sources[0].source}`);
+}
+
+streamAnime('Naruto');
+```
+
+### Example 2: Browse Airing
+```javascript
+async function browseAiring() {
+  await animepahe.initialize();
+  
+  const airing = await animepahe.getAiring();
+  airing.data.forEach(anime => {
+    console.log(`${anime.title} (${anime.episodes} eps)`);
+  });
+}
+
+browseAiring();
+```
+
+### Example 3: Get Anime Details
+```javascript
+async function getDetails(query) {
+  await animepahe.initialize();
+  
+  const search = await animepahe.search(query);
+  const anime = search.data[0];
+  
+  const info = await animepahe.getInfo(anime.session);
+  
+  console.log(`Title: ${info.title}`);
+  console.log(`Genres: ${info.genre.join(', ')}`);
+  console.log(`Status: ${info.status}`);
+  console.log(`Synopsis: ${info.synopsis.substring(0, 100)}...`);
+}
+
+getDetails('Naruto');
+```
+
+---
+
+## ⚡ Error Handling
+
+```javascript
+try {
+  const results = await animepahe.search('Naruto');
+} catch (error) {
+  console.error('Error:', error.message);
 }
 ```
 
-### Example 2: Searching for Anime
-```javascript
-async function searchAnime(query) {
-    const response = await fetch(`https://api.animepahe.com/api/search?query=${encodeURIComponent(query)}`);
-    const data = await response.json();
-    console.log(data);
-}
+---
+
+## ⚙️ Environment Variables
+
+```env
+BASE_URL=https://animepahe.si
+USER_AGENT=Mozilla/5.0...
+IFRAME_BASE_URL=kwik.cx
+USE_PROXY=true
+PROXIES=http://proxy.com:8080
 ```
 
-## Conclusion
-This cheatsheet serves as a quick reference for using the AnimePahe API. For more detailed information, refer to the official documentation.
+---
+
+## 📋 Summary
+
+| Function | Purpose |
+|----------|---------|
+| `search()` | Find anime |
+| `getAiring()` | Currently airing |
+| `getInfo()` | Anime details |
+| `getReleases()` | Episode list |
+| `getStreamingLinks()` | Streams & downloads |
+| `getDownloadLink()` | Direct download |
+| `getAnimeList()` | Browse by letter/genre |
+| `getQueue()` | Encoding queue |
+| `initialize()` | Init & refresh |
+
+---
+
+## 🎯 Key Points
+
+✅ Use **session IDs** from search results for other functions  
+✅ Call **initialize()** once at startup  
+✅ Use **try-catch** for errors  
+✅ Respect **rate limits** - add delays between requests  
+
+---
+
+That's all 9 functions! Happy coding! 🎬✨
