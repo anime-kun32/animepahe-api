@@ -41,11 +41,22 @@ class PlayModel {
             return m ? m[0] : null;
         };
 
+        let filename = null;
+        const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+        if (titleMatch && titleMatch[1]) {
+            filename = titleMatch[1].trim();
+            filename = filename.replace(/\s*::\s*Kwik/i, '').trim();
+        }
+
         for (const script of scriptMatches) {
             // Optimization: fast regex check before heavy VM execution
             const fromScript = findM3u8(script);
             if (fromScript) {
-                return [{ url: fromScript, isM3U8: fromScript.includes('.m3u8') || false }];
+                return [{ 
+                    url: fromScript, 
+                    isM3U8: fromScript.includes('.m3u8') || false,
+                    filename: filename 
+                }];
             }
 
             if (!script.includes('eval(')) continue;
@@ -119,14 +130,22 @@ class PlayModel {
 
             if (captured.size) {
                 const arr = Array.from(captured);
-                return [{ url: arr[0] || null, isM3U8: arr[0].includes('.m3u8') || false }];
+                return [{ 
+                    url: arr[0] || null, 
+                    isM3U8: arr[0].includes('.m3u8') || false,
+                    filename: filename 
+                }];
             }
 
             try {
                 const vsrc = videoEl && videoEl.src;
                 const found = findM3u8(vsrc);
                 if (found) {
-                return [{ url: found, isM3U8: found.includes('.m3u8') || false }];
+                return [{ 
+                    url: found, 
+                    isM3U8: found.includes('.m3u8') || false,
+                    filename: filename 
+                }];
                 }
             } catch (e) {}
 
@@ -134,7 +153,11 @@ class PlayModel {
                 const pkg = JSON.stringify(sandbox);
                 const found = findM3u8(pkg);
                 if (found) {
-                return [{ url: found, isM3U8: found.includes('.m3u8') || false }];
+                return [{ 
+                    url: found, 
+                    isM3U8: found.includes('.m3u8') || false,
+                    filename: filename 
+                }];
                 }
             } catch (e) {}
         }
@@ -143,7 +166,11 @@ class PlayModel {
         const fallback = html.match(/data-src="([^"]+\.m3u8[^"]*)"/i);
         if (fallback) {
             console.log('FOUND data-src m3u8 (fallback):', fallback[1]);
-            return [{ url: fallback[1], isM3U8: fallback[1].includes('.m3u8') || false }];
+            return [{ 
+                url: fallback[1], 
+                isM3U8: fallback[1].includes('.m3u8') || false,
+                filename: filename 
+            }];
         }
 
         console.log('Could not resolve m3u8 from any Kwik script.');
@@ -221,6 +248,7 @@ class PlayModel {
             try {
                 const directDownloadLink = await this.getDownloadLinks(link);
                 item.download = directDownloadLink.downloadUrl;
+                item.filename = directDownloadLink.filename;
                 return item;
             } catch (error) {
                 console.error(`Failed to get direct download for ${link}: ${error.message}`);
@@ -284,15 +312,12 @@ class PlayModel {
         const playInfo = {
             ids: {
                 animepahe_id: parseInt($('meta[name="id"]').attr('content'), 10) || null,
-                mal_id: parseInt($('meta[name="anidb"]').attr('content'), 10) || null,
+                anidb_id: parseInt($('meta[name="anidb"]').attr('content'), 10) || null,
                 anilist_id: parseInt($('meta[name="anilist"]').attr('content'), 10) || null,
-                anime_planet_id: parseInt($('meta[name="anime-planet"]').attr('content'), 10) || null,
+                anime_planet_id: $('meta[name="anime_planet"]').attr('content') || null,
                 ann_id: parseInt($('meta[name="ann"]').attr('content'), 10) || null,
-                anilist: $('meta[name="anilist"]').attr('content') || null,
-                anime_planet: $('meta[name="anime-planet"]').attr('content') || null,
-                ann: $('meta[name="ann"]').attr('content') || null,
-                kitsu: $('meta[name="kitsu"]').attr('content') || null,
-                myanimelist: $('meta[name="myanimelist"]').attr('content') || null,
+                kitsu_id: parseInt($('meta[name="kitsu"]').attr('content'), 10) || null,
+                mal_id: parseInt($('meta[name="mal"]').attr('content'), 10) || null,
             },
             session,
             provider,
@@ -328,6 +353,11 @@ class PlayModel {
             const fastDownloadMap = new Map();
             
             const processedSources = allSources.flat().map(source => {
+                let downloadPage = null;
+                if (source.embed && source.embed.includes('/e/')) {
+                    downloadPage = source.embed.replace('/e/', '/f/');
+                }
+
                 if (includeDownloads && source.url && source.isM3U8) {
                     const downloadUrl = UrlConverter.buildDownloadUrl(
                         source.url,
@@ -339,14 +369,17 @@ class PlayModel {
                             fansub: source.fanSub,
                             isDub: source.isDub,
                             isBD: source.isBD
-                        }
+                        },
+                        source.filename // Pass the certain filename from the iframe
                     );
                     
                     if (downloadUrl) {
-                        source.download = downloadUrl;
-                        // Key format: "720-SubsPlease-false-true" (res-fansub-isDub-isBD)
                         const key = `${source.resolution}-${source.fanSub || 'default'}-${source.isDub}-${source.isBD}`;
-                        fastDownloadMap.set(key, downloadUrl);
+                        fastDownloadMap.set(key, { 
+                            download: downloadUrl, 
+                            downloadPage: downloadPage,
+                            filename: source.filename
+                        });
                     }
                 }
                 return source;
@@ -355,13 +388,14 @@ class PlayModel {
             playInfo.sources = processedSources;
             
             if (includeDownloads) {
-                // Hydrate the metadata list with our fast links
                 const hydratedDownloads = metadataList.map(item => {
                     const key = `${item.resolution}-${item.fansub || 'default'}-${item.isDub}-${item.isBD}`;
-                    const fastDownload = fastDownloadMap.get(key);
+                    const cached = fastDownloadMap.get(key);
                     
-                    if (fastDownload) {
-                        item.download = fastDownload;
+                    if (cached) {
+                        item.download = cached.download;
+                        item.downloadPage = cached.downloadPage;
+                        if (cached.filename) item.filename = cached.filename;
                     }
                     return item;
                 });

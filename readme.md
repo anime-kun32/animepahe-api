@@ -1,6 +1,6 @@
 # AnimepaheAPI
 
-An unofficial REST API for [Animepahe](https://animepahe.si/) that provides access to anime information, episodes, and streaming links with direct download support.
+An unofficial REST API for [Animepahe](https://animepahe.pw/) that provides access to anime information, episodes, and streaming links with direct download support.
 
 > **⚠️ IMPORTANT NOTICE: API MAYBE Temporarily Paused**  
 > The API maybe temporarily paused due to suspiciously too many requests. My hosted version of this API is only for testing purposes. **You MUST host your own instance** to use the API.
@@ -73,7 +73,7 @@ It works as it is but if you want you can create a `.env` file in the root direc
 
 ```env
 PORT=3000 # Optional
-BASE_URL=https://animepahe.ru # Optional
+BASE_URL=https://animepahe.pw # Optional
 USER_AGENT=  # Optional
 COOKIES=     # Optional - for manual cookie management
 USE_PROXY=false
@@ -172,6 +172,7 @@ GET /api/play/download-links?url=https://pahe.win/XYZ # To only get one download
 > - `:session` is the anime's unique identifier
 > - `episodeId` is the episode's unique identifier from the /releases endpoint
 > - Use `downloads=false` for faster responses if you only need streaming links
+> - **Important:** When downloading the direct `.mp4` video (the `download` URL), you MUST pass the provided `downloadPage` URL as the `Referer` header to avoid errors.
 
 ### Queue Status
 ```
@@ -197,7 +198,8 @@ The API returns errors in this format:
 - @sparticuz/chromium
 - Cheerio
 - Axios
-- cloudscraper
+- got-scraping
+- cloudscraper (changed to above library)
 - jsdom
 - vm
 

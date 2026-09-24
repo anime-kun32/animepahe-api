@@ -4,7 +4,7 @@ dotenv.config();
 class Config {
     constructor() {
         this.hostUrl = '';
-        this.baseUrl = 'https://animepahe.si'; 
+        this.baseUrl = 'https://animepahe.pw'; 
         this.iframeBaseUrl = 'kwik.cx';
         this.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
         this.extraHTTPHeaders = {
@@ -43,7 +43,6 @@ class Config {
         try {
             if(typeof cookieHeader === 'string' && cookieHeader.includes('=')) {
                 this.cookies = cookieHeader;
-                console.log('\x1b[36m%s\x1b[0m', 'Cookies successfully set');
                 return true;
             } else {
                 console.warn("Warning: Invalid cookie format");

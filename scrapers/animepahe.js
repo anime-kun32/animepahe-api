@@ -6,7 +6,6 @@ const vm = require('vm')
 const RequestManager = require("../utils/requestManager");
 const { launchBrowser } = require('../utils/browser');
 const { CustomError } = require('../middleware/errorHandler');
-const os = require('os');
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -261,42 +260,31 @@ class Animepahe {
         // To add more strategies in the future, add them to this array:
         const allStrategies = [
             () => this.scrapeIframeLight(url),
-            // () => this.scrapeIframeHeavy(Config.getUrl('play', id, episodeId), url),
+            () => this.scrapeIframePlaywright(url),
         ];
 
-        // Process strategies in parallel, max 2 at a time
-        const maxParallel = 2;
-        
-        for (let i = 0; i < allStrategies.length; i += maxParallel) {
-            const batch = allStrategies.slice(i, i + maxParallel);
-            console.log(`Trying ${batch.length} strategies in parallel (batch ${Math.floor(i / maxParallel) + 1}/${Math.ceil(allStrategies.length / maxParallel)})...`);
-            
-            const promises = batch.map(async (strategy, idx) => {
-                try {
-                    console.log(`Starting strategy ${i + idx + 1} in parallel...`);
-                    const result = await strategy();
-                    if (result && result.length > 100) {
-                        console.log(`Strategy ${i + idx + 1} succeeded`);
-                        return { success: true, result, strategyIndex: i + idx };
-                    }
-                    return { success: false, error: 'Result too short', strategyIndex: i + idx };
-                } catch (error) {
-                    console.warn(`Strategy ${i + idx + 1} failed:`, error.message);
-                    return { success: false, error: error.message, strategyIndex: i + idx };
-                }
-            });
+        const errors = [];
 
-            const results = await Promise.all(promises);
-            
-            // Check if any strategy in the batch succeeded
-            const successfulResult = results.find(r => r.success);
-            if (successfulResult) {
-                return successfulResult.result;
+        for (let i = 0; i < allStrategies.length; i++) {
+            const strategy = allStrategies[i];
+            try {
+                console.log(`Trying strategy ${i + 1}/${allStrategies.length}...`);
+                const result = await strategy();
+                
+                if (result && result.length > 100) {
+                    console.log(`Strategy ${i + 1} succeeded`);
+                    return result;
+                }
+                
+                throw new Error('Result too short or invalid');
+            } catch (error) {
+                console.warn(`Strategy ${i + 1} failed:`, error.message);
+                errors.push(`Strategy ${i + 1}: ${error.message}`);
             }
         }
 
         // If all strategies failed, throw error with all failure details
-        throw new CustomError('All iframe fetching strategies failed', 503);
+        throw new CustomError(`All iframe fetching strategies failed: ${errors.join(', ')}`, 503);
     }
 
     async scrapeIframe(id, episodeId, url) {
@@ -315,18 +303,25 @@ class Animepahe {
             throw new CustomError('URL is required', 400);
         }
 
-        const resolvedUrl = await this.extractKwikUrl(url);
+        const { kwikUrl: resolvedUrl, filename } = await this.extractKwikUrl(url);
         if (!resolvedUrl) {
             // If can't extract the URL, try the original URL
-            const downloadUrl = await this.getKwikDownloadUrl(url);
-            return { downloadUrl, type: 'direct_download' };
+            const { downloadUrl, filename: directFilename } = await this.getKwikDownloadUrl(url);
+            return { downloadUrl, filename: directFilename, type: 'direct_download' };
         }
         
         console.log('Found Kwik URL:', resolvedUrl);
+        if (filename) console.log('Extracted Certain Filename:', filename);
         
         // Use the extracted URL for getting the download link
-        const downloadUrl = await this.getKwikDownloadUrl(resolvedUrl);
-        return { downloadUrl, type: 'redirected_download', originalUrl: url, resolvedUrl };
+        const { downloadUrl, filename: kwikFilename } = await this.getKwikDownloadUrl(resolvedUrl);
+        return { 
+            downloadUrl, 
+            filename: filename || kwikFilename, 
+            type: 'redirected_download', 
+            originalUrl: url, 
+            resolvedUrl 
+        };
     }
 
     async extractKwikUrl(url) {
@@ -335,7 +330,7 @@ class Animepahe {
             
             const response = await RequestManager.cloudscraperGet(url, {
                 headers: {
-                    "Referer": "https://animepahe.si/",
+                    "Referer": Config.getUrl('home'),
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
                 },
                 timeout: 30000,
@@ -344,12 +339,24 @@ class Animepahe {
             console.log("Page fetched for extraction, status:", response.statusCode);
             
             const body = response.body;
+
+            let filename = null;
+            // The title may or may not contain ":: Kwik"
+            const titleMatch = body.match(/<title>([^<]+)<\/title>/i);
+            if (titleMatch && titleMatch[1]) {
+                filename = titleMatch[1].replace(/\s*::\s*Kwik.*$/i, '').trim();
+            } else {
+                const h2Match = body.match(/<h2>\s*([^<]+)\s*<\/h2>/i);
+                if (h2Match && h2Match[1]) {
+                    filename = h2Match[1].replace(/\s*::\s*Kwik.*$/i, '').trim();
+                }
+            }
             
             const redirectPattern = /href\s*:\s*["']([^"']+)["']/i;
             const redirectMatch = body.match(redirectPattern);
             if (redirectMatch && redirectMatch[1] && redirectMatch[1].includes(Config.iframeBaseUrl)) {
                 console.log('Found redirect URL:', redirectMatch[1]);
-                return redirectMatch[1];
+                return { kwikUrl: redirectMatch[1], filename };
             }
             
             // Dynamic regex for script pattern
@@ -366,7 +373,7 @@ class Animepahe {
                     kwikUrl = `https://${Config.iframeBaseUrl}${kwikUrl}`;
                 }
                 console.log('Found Kwik URL from script:', kwikUrl);
-                return kwikUrl;
+                return { kwikUrl, filename };
             }
             
             // Pattern 3: Look for kwik.cx URLs in href attributes
@@ -381,7 +388,7 @@ class Animepahe {
                     kwikUrl = urlObj.protocol + '//' + urlObj.host + kwikUrl;
                 }
                 console.log('Found Kwik URL from href:', kwikUrl);
-                return kwikUrl;
+                return { kwikUrl, filename };
             }
             
             // Pattern 4: Look for kwik.cx URLs in JavaScript redirects
@@ -389,7 +396,7 @@ class Animepahe {
             const jsMatch = body.match(jsRedirectPattern);
             if (jsMatch && jsMatch[1]) {
                 console.log('Found Kwik URL from JavaScript:', jsMatch[1]);
-                return jsMatch[1];
+                return { kwikUrl: jsMatch[1], filename };
             }
             
             // Pattern 5: Look for the specific script pattern you mentioned
@@ -397,15 +404,15 @@ class Animepahe {
             const specificMatch = body.match(specificPattern);
             if (specificMatch && specificMatch[1]) {
                 console.log('Found Kwik URL from specific pattern:', specificMatch[1]);
-                return specificMatch[1];
+                return { kwikUrl: specificMatch[1], filename };
             }
             
             console.log('No Kwik URL found in the HTML content');
-            return null;
+            return { kwikUrl: null, filename };
             
         } catch (error) {
             console.error('Error extracting Kwik URL:', error.message);
-            return null;
+            return { kwikUrl: null, filename: null };
         }
     }
 
@@ -414,7 +421,7 @@ class Animepahe {
     
         const getResponse = await RequestManager.cloudscraperGet(url, {
             headers: {
-                "Referer": "https://animepahe.si/",
+                "Referer": Config.getUrl('home'),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             },
             timeout: 30000,
@@ -513,6 +520,13 @@ class Animepahe {
     
         console.log("[Step 3] Extracted action:", foundAction);
         console.log("[Step 3] Extracted token:", foundToken);
+
+        // Extract filename from the kwik page itself as fallback/verification
+        let filename = null;
+        const titleMatch = body.match(/<title>([^<]+)<\/title>/i);
+        if (titleMatch && titleMatch[1]) {
+            filename = titleMatch[1].replace(/\s*::\s*Kwik.*$/i, '').trim();
+        }
     
         // Wait a bit to simulate human behavior
         console.log("[Step 4] Waiting 2 seconds...");
@@ -547,7 +561,7 @@ class Animepahe {
             if (postResponse.statusCode === 302 || postResponse.statusCode === 301) {
                 const downloadUrl = postResponse.location || postResponse.headers.location;
                 console.log("Final download URL:", downloadUrl);
-                return downloadUrl;
+                return { downloadUrl, filename };
             } 
             
             if (postResponse.statusCode === 200) {
@@ -556,16 +570,14 @@ class Animepahe {
                 const metaMatch = body.match(/<meta[^>]*http-equiv=["']refresh["'][^>]*content=["'][^"]*url=([^"']+)["']/i);
                 if (metaMatch) {
                     console.log("Found meta refresh URL:", metaMatch[1]);
-                    return metaMatch[1];
+                    return { downloadUrl: metaMatch[1], filename };
                 }
                 
                 const jsMatch = body.match(/window\.location(?:\.href)?\s*=\s*["']([^"']+)["']/i);
                 if (jsMatch) {
                     console.log("Found JavaScript redirect URL:", jsMatch[1]);
-                    return jsMatch[1];
+                    return { downloadUrl: jsMatch[1], filename };
                 }
-
-                console.log("[Response body snippet]:", body.substring(0, 800));
             }
         } catch (error) {
             console.log("[Request Error]:", error.message);
@@ -575,7 +587,7 @@ class Animepahe {
                 const downloadUrl = error.response?.headers?.location;
                 if (downloadUrl) {
                     console.log("Final download URL (from error):", downloadUrl);
-                    return downloadUrl;
+                    return { downloadUrl, filename };
                 }
             }
             throw error;
@@ -620,8 +632,14 @@ class Animepahe {
  
     async scrapeIframeLight(url) {
         try {
-            const html = await RequestManager.scrapeWithCloudScraper(url);
+            const html = await RequestManager.scrapeWithGotScraping(url, {
+                referer: Config.getUrl("home")
+            });
             
+            if (html && html.toLowerCase().includes('attention required!')) {
+                throw new Error('Response blocked or invalid');
+            }
+
             if (html && html.length > 100 && 
                 !html.toLowerCase().includes('just a moment') &&
                 !html.toLowerCase().includes('checking your browser')) {
@@ -630,7 +648,30 @@ class Animepahe {
             
             throw new Error('Response blocked or invalid');
         } catch (error) {
-            console.warn('Cloudscraper method failed:', error.message);
+            console.warn('[scrapeIframeLight] GotScraping failed:', error.message);
+            throw error;
+        }
+    }
+
+    async scrapeIframePlaywright(url) {
+        try {
+            const html = await RequestManager.scrapeWithPlaywrightPage(url, {
+                referer: Config.getUrl("home")
+            });
+
+            if (html && html.toLowerCase().includes('attention required!')) {
+                throw new Error('Response blocked or invalid');
+            }
+
+            if (html && html.length > 100 &&
+                !html.toLowerCase().includes('just a moment') &&
+                !html.toLowerCase().includes('checking your browser')) {
+                return html;
+            }
+
+            throw new Error('Response blocked or invalid');
+        } catch (error) {
+            console.warn('[scrapeIframePlaywright] Playwright failed:', error.message);
             throw error;
         }
     }

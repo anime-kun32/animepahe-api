@@ -5,6 +5,51 @@ const Config = require('./config');
 const { CustomError } = require('../middleware/errorHandler');
 
 class RequestManager {
+    static getPlaywrightProxyOptions(proxyString) {
+        if (!proxyString) return null;
+        try {
+            const formatted = (proxyString.startsWith('http://') || proxyString.startsWith('https://') || proxyString.startsWith('socks5://'))
+                ? proxyString 
+                : 'http://' + proxyString;
+            const parsedUrl = new URL(formatted);
+            const proxyOptions = {
+                server: `${parsedUrl.protocol}//${parsedUrl.host}`
+            };
+            if (parsedUrl.username) {
+                proxyOptions.username = decodeURIComponent(parsedUrl.username);
+            }
+            if (parsedUrl.password) {
+                proxyOptions.password = decodeURIComponent(parsedUrl.password);
+            }
+            return proxyOptions;
+        } catch (e) {
+            console.error('Error parsing proxy for Playwright:', e.message);
+            return { server: proxyString };
+        }
+    }
+
+    static maskProxyUrl(proxyUrl) {
+        if (!proxyUrl) return 'null';
+        try {
+            const formatted = (proxyUrl.startsWith('http://') || proxyUrl.startsWith('https://') || proxyUrl.startsWith('socks5://'))
+                ? proxyUrl 
+                : 'http://' + proxyUrl;
+            const parsed = new URL(formatted);
+            let maskedUser = '';
+            let maskedPass = '';
+            if (parsed.username) {
+                maskedUser = parsed.username.substring(0, Math.min(2, parsed.username.length)) + '*'.repeat(Math.max(0, parsed.username.length - 2));
+            }
+            if (parsed.password) {
+                maskedPass = parsed.password.substring(0, Math.min(2, parsed.password.length)) + '*'.repeat(Math.max(0, parsed.password.length - 2));
+            }
+            const auth = parsed.username ? `${maskedUser}:${maskedPass}@` : '';
+            return `${parsed.protocol}//${auth}${parsed.host} (length: ${proxyUrl.length}, raw length: ${proxyUrl.trim().length})`;
+        } catch (e) {
+            return `[Invalid/Unparseable Proxy URL] (length: ${proxyUrl.length})`;
+        }
+    }
+
     /**
      * Universal cloudscraper method - handles GET, POST, and any HTTP method
      * @param {Object} options - Request options
@@ -157,10 +202,83 @@ class RequestManager {
         return response.body;
     }
 
+    /**
+     * Scrape using got-scraping to bypass Cloudflare
+     */
+    static async scrapeWithGotScraping(url, options = {}) {
+        console.log(`Fetching HTML with GotScraping from ${url}...`);
+        
+        const { gotScraping } = await import('got-scraping');
+        
+        try {
+            const response = await gotScraping({
+                url: url,
+                headers: {
+                    'Referer': options.referer || Config.baseUrl,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Connection': 'keep-alive',
+                    ...options.headers
+                },
+                headerGeneratorOptions: {
+                    browsers: [{name: 'chrome', minVersion: 110}],
+                    devices: ['desktop'],
+                    locales: ['en-US', 'en'],
+                    operatingSystems: ['windows']
+                },
+                throwHttpErrors: false,
+                timeout: { request: options.timeout || 30000 }
+            });
+            return response.body;
+        } catch (error) {
+            console.error(`[GotScraping Error] GET ${url}:`, error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Scrape a page using the serverless-compatible Playwright browser as a fallback.
+     * Uses the same launchBrowser() from browser.js which automatically picks
+     * @sparticuz/chromium on Linux/serverless and regular Playwright locally.
+     */
+    static async scrapeWithPlaywrightPage(url, options = {}) {
+        console.log(`Fetching HTML with Playwright from ${url}...`);
+        
+        const browser = await launchBrowser();
+        try {
+            const context = await browser.newContext({
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                extraHTTPHeaders: {
+                    'Referer': options.referer || Config.baseUrl,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Upgrade-Insecure-Requests': '1',
+                }
+            });
+
+            await context.addInitScript(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            });
+
+            const page = await context.newPage();
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.timeout || 60000 });
+
+            // Wait a moment for any JS-driven Cloudflare challenges to resolve
+            await page.waitForTimeout(3000);
+
+            const content = await page.content();
+            await context.close();
+            return content;
+        } finally {
+            await browser.close();
+        }
+    }
+
     static async scrapeWithPlaywright(url) {
         console.log('Fetching content from:', url);
         const proxy = Config.proxyEnabled ? Config.getRandomProxy() : null;
-        console.log(`Using proxy: ${proxy || 'none'}`);
 
         const browser = await launchBrowser();
 
@@ -168,7 +286,10 @@ class RequestManager {
             const contextOptions = {};
 
             if (proxy) {
-                contextOptions.proxy = { server: proxy };
+                const pwProxy = this.getPlaywrightProxyOptions(proxy);
+                if (pwProxy) {
+                    contextOptions.proxy = pwProxy;
+                }
             }
 
             const context = await browser.newContext(contextOptions);
@@ -267,7 +388,6 @@ class RequestManager {
         console.log('Fetching Cloudflare-protected content from:', url);
         
         const proxy = Config.proxyEnabled ? Config.getRandomProxy() : null;
-        console.log(`Using proxy: ${proxy || 'none'}`);
 
         const browser = await launchBrowser();
 
@@ -291,7 +411,10 @@ class RequestManager {
             };
 
             if (proxy) {
-                contextOptions.proxy = { server: proxy };
+                const pwProxy = this.getPlaywrightProxyOptions(proxy);
+                if (pwProxy) {
+                    contextOptions.proxy = pwProxy;
+                }
             }
 
             const context = await browser.newContext(contextOptions);
@@ -405,11 +528,16 @@ class RequestManager {
             }
             
             const proxyUrl = Config.proxyEnabled ? Config.getRandomProxy() : null;
-            const [proxyHost, proxyPort] = proxyUrl ? proxyUrl.split(':') : [null, null];
 
-            console.log(`Using proxy: ${proxyUrl || 'none'}`);
-            if (proxyHost && !proxyPort) {
-                throw new CustomError('Invalid proxy format. Expected format: host:port', 400);
+            // Build proxy agents for proper authenticated proxy support
+            let httpAgent = undefined;
+            let httpsAgent = undefined;
+            if (proxyUrl) {
+                const { HttpProxyAgent } = await import('http-proxy-agent');
+                const { HttpsProxyAgent } = await import('https-proxy-agent');
+                const formattedProxyUrl = proxyUrl.startsWith('http') ? proxyUrl : 'http://' + proxyUrl;
+                httpAgent = new HttpProxyAgent(formattedProxyUrl);
+                httpsAgent = new HttpsProxyAgent(formattedProxyUrl);
             }
 
             const response = await axios.get(url, {
@@ -419,7 +547,6 @@ class RequestManager {
                     'Accept-Language': 'en-US,en;q=0.9',
                     'Referer': Config.getUrl('home'),
                     'User-Agent': Config.userAgent,
-                    'Accept-Language': 'en-US,en;q=0.9', 
                     'Sec-Fetch-*': '?', 
                     "dnt": "1",
                     "sec-ch-ua": '"Not A(Brand";v="99", "Microsoft Edge";v="121", "Chromium";v="121"',
@@ -431,11 +558,9 @@ class RequestManager {
                     "x-requested-with": "XMLHttpRequest",
                     'Cookie': cookieHeader
                 },
-                proxy: proxyUrl ? {
-                    host: proxyHost,
-                    port: parseInt(proxyPort),
-                    protocol: 'http'
-                } : false
+                proxy: false,
+                ...(httpAgent ? { httpAgent } : {}),
+                ...(httpsAgent ? { httpsAgent } : {})
             });
 
             const responseText = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
@@ -448,8 +573,13 @@ class RequestManager {
 
             return response.data;
         } catch (error) {
-            if (error.response?.status === 403) {
-                console.log(Config.cookies);
+            if (error.response?.status === 407) {
+                const proxyUrl = Config.proxyEnabled ? Config.getRandomProxy() : null;
+                console.error(`[Proxy 407] Proxy authentication failed. Proxy: ${this.maskProxyUrl(proxyUrl)}`);
+                console.error(`[Proxy 407] USE_PROXY=${process.env.USE_PROXY}, PROXIES env length=${(process.env.PROXIES || '').length}`);
+                throw new CustomError('Proxy authentication failed (407). Check proxy credentials in environment.', 407);
+            }
+            if (error.response?.status === 403 || error.response?.status === 502 || error.response?.status === 503) {
                 throw new CustomError('DDoS-Guard authentication required, invalid cookies', 403);
             }
             if (error.response?.status === 404) {

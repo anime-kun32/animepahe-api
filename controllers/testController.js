@@ -60,17 +60,24 @@ async function extractKwikUrl(url) {
     try {
         console.log('[Step 1] Fetching page to extract Kwik URL:', url);
         
-        const response = await cloudscraper.get({
-            uri: url,
+        const { gotScraping } = await import('got-scraping');
+        const response = await gotScraping({
+            url: url,
             headers: {
-                Referer: "https://animepahe.si/",
+                Referer: "https://animepahe.pw/",
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
                 "Connection": "keep-alive",
             },
-            resolveWithFullResponse: true,
-            timeout: 30000,
+            headerGeneratorOptions: {
+                browsers: [{name: 'chrome', minVersion: 110}],
+                devices: ['desktop'],
+                locales: ['en-US', 'en'],
+                operatingSystems: ['windows']
+            },
+            throwHttpErrors: false,
+            timeout: { request: 30000 },
         });
 
         console.log("Page fetched for extraction, status:", response.statusCode);
@@ -145,17 +152,24 @@ async function extractKwikUrl(url) {
 async function getKwikDownloadUrl(url) {
     console.log("[Step 2] Fetching page for download link:", url);
 
-    const getResponse = await cloudscraper.get({
-        uri: url,
+    const { gotScraping } = await import('got-scraping');
+    const getResponse = await gotScraping({
+        url: url,
         headers: {
-            Referer: "https://animepahe.si/",
+            Referer: "https://animepahe.pw/",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "Connection": "keep-alive",
         },
-        resolveWithFullResponse: true,
-        timeout: 30000,
+        headerGeneratorOptions: {
+            browsers: [{name: 'chrome', minVersion: 110}],
+            devices: ['desktop'],
+            locales: ['en-US', 'en'],
+            operatingSystems: ['windows']
+        },
+        throwHttpErrors: false,
+        timeout: { request: 30000 },
     });
 
     console.log("[✓] Page fetched, status:", getResponse.statusCode);
@@ -267,9 +281,10 @@ async function getKwikDownloadUrl(url) {
         console.log("[Running on serverless platform - using cloudscraper for POST]");
         
         try {
-            const postResponse = await cloudscraper({
+            const { gotScraping } = await import('got-scraping');
+            const postResponse = await gotScraping({
                 method: 'POST',
-                uri: foundAction,
+                url: foundAction,
                 form: {
                     _token: foundToken
                 },
@@ -282,11 +297,15 @@ async function getKwikDownloadUrl(url) {
                     "Referer": url,
                     "Cookie": cookies,
                 },
-                followAllRedirects: false,
+                headerGeneratorOptions: {
+                    browsers: [{name: 'chrome', minVersion: 110}],
+                    devices: ['desktop'],
+                    locales: ['en-US', 'en'],
+                    operatingSystems: ['windows']
+                },
                 followRedirect: false,
-                simple: false,
-                resolveWithFullResponse: true,
-                timeout: 30000,
+                throwHttpErrors: false,
+                timeout: { request: 30000 },
             });
 
             console.log("[Step 6] Response status:", postResponse.statusCode);
@@ -394,14 +413,24 @@ async function getKwikDownloadUrl(url) {
 async function resolveKwik(url) {
     console.log(`Fetching HTML from ${url}...`);
 
-    const html = await cloudscraper.get(url, {
+    const { gotScraping } = await import('got-scraping');
+    const response = await gotScraping({
+        url: url,
         headers: {
-            Referer: 'https://animepahe.si/',
+            Referer: 'https://animepahe.pw/',
             'User-Agent':
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         },
-        timeout: 20000,
+        headerGeneratorOptions: {
+            browsers: [{name: 'chrome', minVersion: 110}],
+            devices: ['desktop'],
+            locales: ['en-US', 'en'],
+            operatingSystems: ['windows']
+        },
+        throwHttpErrors: false,
+        timeout: { request: 20000 },
     });
+    const html = response.body;
 
     console.log('Fetched HTML successfully.');
 

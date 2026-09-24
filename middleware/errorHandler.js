@@ -9,7 +9,9 @@ const errorHandler = (err, req, res, next) => {
     const statusCode = (err.response?.status) || err.statusCode || 500;
     const message = err.message || 'Something went wrong';
 
-    console.error(`Error: ${message} (Status Code: ${statusCode})`);
+    if (statusCode !== 404 || !message.includes('Route not found')) {
+        console.error(`Error: ${message} (Status Code: ${statusCode})`);
+    }
 
     const response = {
         status: statusCode,

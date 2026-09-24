@@ -15,7 +15,6 @@ class HomeModel {
     }
 
     static async searchAnime(query, page) {
-        console.log(page);
         if (!query) {
             throw new CustomError('Search query is required', 400);
         }

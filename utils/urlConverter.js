@@ -16,13 +16,6 @@ class UrlConverter {
         try {
             const urlObj = new URL(m3u8Url);
             
-            const hostParts = urlObj.hostname.split('.');
-            if (hostParts[0].startsWith('vault-')) {
-                urlObj.hostname = `${hostParts[0]}.${kwikDomain}`;
-            } else {
-                urlObj.hostname = kwikDomain;
-            }
-            
             urlObj.pathname = urlObj.pathname.replace('/stream/', '/mp4/');
             
             if (urlObj.pathname.endsWith('/uwu.m3u8')) {
@@ -59,11 +52,11 @@ class UrlConverter {
     /**
      * Builds the full download URL with filename parameter
      */
-    static buildDownloadUrl(m3u8Url, kwikDomain, metadata) {
+    static buildDownloadUrl(m3u8Url, kwikDomain, metadata, certainFilename = null) {
         const mp4Url = this.getMp4Url(m3u8Url, kwikDomain);
         if (!mp4Url) return null;
         
-        const filename = this.getFilename(
+        const filename = certainFilename || this.getFilename(
             metadata.animeTitle,
             metadata.episode,
             metadata.resolution,
